@@ -44,6 +44,10 @@ entity scheduler_fsm is
         -- buttons
         btn_step         : in  std_logic;   -- BTN2
         btn_override     : in  std_logic;   -- BTN3
+        btn_park         : in  std_logic;   -- BTNU: skip release, return to IDLE (keeps resources busy)
+
+        -- park strobe: 1-cycle pulse when patient is parked (for patient_table)
+        park_en          : out std_logic;
 
         -- resource manager control signals
         alloc_room       : out std_logic;
@@ -58,6 +62,7 @@ entity scheduler_fsm is
 
         -- current assignments (for display)
         curr_patient_id  : out std_logic_vector(3 downto 0);
+        curr_severity    : out std_logic_vector(1 downto 0);
         curr_priority    : out std_logic_vector(2 downto 0);
         curr_room        : out std_logic_vector(2 downto 0);
         curr_doctor      : out std_logic_vector(2 downto 0);
@@ -111,8 +116,17 @@ architecture rtl of scheduler_fsm is
 
     signal override_active : std_logic := '0';
 
+    -- park button edge detector (BTNU: skip release -> IDLE, keeps resources busy)
+    signal park_prev    : std_logic := '0';
+    signal park_sync0   : std_logic := '0';
+    signal park_sync1   : std_logic := '0';
+    signal park_pulse   : std_logic;
+
     -- one-shot flag: prevents alloc/release pulses from firing more than once per state visit
     signal alloc_sent : std_logic := '0';
+
+    -- delayed clear: park_en fires cycle N, display regs clear cycle N+1
+    signal park_done  : std_logic := '0';
 
 begin
     -- treatment timer load value based on severity
@@ -124,8 +138,12 @@ begin
     -- step button synchroniser + edge
     step_pulse <= step_sync1 and not step_prev;
 
+    -- park button synchroniser + edge
+    park_pulse <= park_sync1 and not park_prev;
+
     -- drive output registers
     curr_patient_id <= reg_id;
+    curr_severity   <= reg_sev;
     curr_priority   <= reg_priority;
     curr_room       <= reg_room;
     curr_doctor     <= reg_doctor;
@@ -160,6 +178,7 @@ begin
             rel_room        <= '0';
             rel_doctor      <= '0';
             rel_equipment   <= '0';
+            park_en         <= '0';
 
             -- synchronise buttons
             step_sync0 <= btn_step;
@@ -169,6 +188,10 @@ begin
             ovr_sync0  <= btn_override;
             ovr_sync1  <= ovr_sync0;
             ovr_prev   <= ovr_sync1;
+
+            park_sync0 <= btn_park;
+            park_sync1 <= park_sync0;
+            park_prev  <= park_sync1;
 
             if reset = '1' then
                 state          <= IDLE;
@@ -180,11 +203,13 @@ begin
                 reg_doctor     <= (others => '0');
                 reg_equip      <= (others => '0');
                 treat_cnt      <= (others => '0');
-                override_active<= '0';
+                override_active  <= '0';
                 treatment_active <= '0';
                 critical_flag    <= '0';
                 fault_out        <= '0';
                 alloc_sent       <= '0';
+                park_en          <= '0';
+                park_done        <= '0';
             else
                 -- emergency override latch
                 if ovr_sync1 = '1' and ovr_prev = '0' then
@@ -201,8 +226,19 @@ begin
 
                     when IDLE =>
                         treatment_active <= '0';
-                        critical_flag    <= '0';
                         fault_out        <= '0';
+                        -- cycle N+1: clear display regs after park_en has been captured
+                        if park_done = '1' then
+                            park_done    <= '0';
+                            reg_id       <= (others => '0');
+                            reg_sev      <= (others => '0');
+                            reg_type     <= (others => '0');
+                            reg_priority <= (others => '0');
+                            reg_room     <= (others => '0');
+                            reg_doctor   <= (others => '0');
+                            reg_equip    <= (others => '0');
+                            critical_flag <= '0';
+                        end if;
                         if patient_valid = '1' then
                             state <= RECEIVE_PATIENT;
                         end if;
@@ -224,7 +260,11 @@ begin
 
                     when TRIAGE =>
                         reg_priority <= priority;
-                        critical_flag <= '1' when reg_sev = "11" else '0';
+                        if reg_sev = "11" then
+                            critical_flag <= '1';
+                        else
+                            critical_flag <= '0';
+                        end if;
                         if step_pulse = '1' then
                             state <= CHECK_RESOURCES;
                         end if;
@@ -273,7 +313,14 @@ begin
                     when DISPATCH_TEAM =>
                         treatment_active <= '1';
                         treat_cnt        <= treat_load;
-                        if step_pulse = '1' then
+                        if park_pulse = '1' then
+                            -- cycle N: fire park_en so patient_table captures indices NOW
+                            park_en          <= '1';
+                            park_done        <= '1';
+                            treatment_active <= '0';
+                            alloc_sent       <= '0';
+                            state            <= IDLE;
+                        elsif step_pulse = '1' then
                             state <= MONITOR_TREATMENT;
                         end if;
 
