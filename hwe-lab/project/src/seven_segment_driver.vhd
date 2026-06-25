@@ -6,31 +6,34 @@ use IEEE.NUMERIC_STD.ALL;
 -- The Nexys A7 uses active-low anodes and active-low cathode segments.
 -- Digits are time-multiplexed at ~1 kHz (100 MHz / 100000).
 --
--- Digit assignments (AN7..AN0):
---   AN0 -> patient ID  (4-bit hex)
---   AN1 -> priority    (3-bit, shown as 0-4)
---   AN2 -> room number (1-4, or 0 = none)
---   AN3 -> doctor      (1-4, or 0 = none)
---   AN4 -> equipment   (1-4, or 0 = none)
---   AN5 -> FSM state   (hex 0-9, F=fault)
---   AN6 -> fault code  (0=ok, 1=fault)
---   AN7 -> system counter (free-running 0-F for life sign)
+-- Digit assignments, physically read from left to right on Nexys A7: AN7..AN0
+--   AN7 -> FSM state (0-9, F=fault)
+--   AN6 -> E when emergency/critical/fault is active, otherwise blank
+--   AN5 -> d label for doctor
+--   AN4 -> doctor number 1-4
+--   AN3 -> r label for room
+--   AN2 -> room number 1-4
+--   AN1 -> sev_level label: n=Normal, U=Urgent, H=High, C=Critical
+--   AN0 -> patient ID hex
+--
+-- Example display:  4 E d 1 r 2 C F
+-- means FSM state 4 (ALLOCATE_ROOM), emergency/critical, doctor 1, room 2, Critical sev_level, patient F.
 
 entity seven_segment_driver is
     port (
-        clk          : in  std_logic;
-        reset        : in  std_logic;
+        clk           : in  std_logic;
+        reset         : in  std_logic;
 
-        patient_id   : in  std_logic_vector(3 downto 0);
-        priority     : in  std_logic_vector(2 downto 0);
-        room_num     : in  std_logic_vector(2 downto 0);
-        doctor_num   : in  std_logic_vector(2 downto 0);
-        equip_num    : in  std_logic_vector(2 downto 0);
-        fsm_state    : in  std_logic_vector(3 downto 0);
-        fault_code   : in  std_logic;
+        patient_id    : in  std_logic_vector(3 downto 0);
+        sev_level      : in  std_logic_vector(1 downto 0);  -- 00=Normal 01=Urgent 10=High 11=Critical
+        room_num      : in  std_logic_vector(2 downto 0);
+        doctor_num    : in  std_logic_vector(2 downto 0);
+        fsm_state     : in  std_logic_vector(3 downto 0);
+        fault_code    : in  std_logic;
+        critical_flag : in  std_logic;
 
-        an           : out std_logic_vector(7 downto 0);  -- active-low anodes
-        seg          : out std_logic_vector(6 downto 0)   -- active-low segments (CA)
+        an            : out std_logic_vector(7 downto 0);  -- active-low anodes
+        seg           : out std_logic_vector(6 downto 0)   -- active-low segments (CA)
     );
 end seven_segment_driver;
 
@@ -39,7 +42,6 @@ architecture rtl of seven_segment_driver is
 
     signal div_cnt   : natural range 0 to MUX_DIV - 1 := 0;
     signal digit_sel : unsigned(2 downto 0) := (others => '0');
-    signal sys_cnt   : unsigned(3 downto 0) := (others => '0');
     signal tick      : std_logic := '0';
     signal digit_val : std_logic_vector(3 downto 0);
 
@@ -60,9 +62,23 @@ architecture rtl of seven_segment_driver is
             when "1010" => return "0001000"; -- A
             when "1011" => return "0000011"; -- B
             when "1100" => return "1000110"; -- C
-            when "1101" => return "0100001"; -- D
+            when "1101" => return "0100001"; -- d / D
             when "1110" => return "0000110"; -- E
             when "1111" => return "0001110"; -- F
+            when others => return "1111111"; -- blank
+        end case;
+    end function;
+
+    function letter_to_seg(ch : character) return std_logic_vector is
+    begin
+        case ch is
+            when 'd'    => return "0100001"; -- d / doctor label
+            when 'r'    => return "0101111"; -- r / room label
+            when 'E'    => return "0000110"; -- E / emergency label
+            when 'n'    => return "0101011"; -- n / Normal
+            when 'U'    => return "1000001"; -- U / Urgent
+            when 'H'    => return "0001001"; -- H / High
+            when 'C'    => return "1000110"; -- C / Critical
             when others => return "1111111"; -- blank
         end case;
     end function;
@@ -74,7 +90,6 @@ begin
             if reset = '1' then
                 div_cnt   <= 0;
                 digit_sel <= (others => '0');
-                sys_cnt   <= (others => '0');
                 tick      <= '0';
             else
                 tick <= '0';
@@ -82,9 +97,6 @@ begin
                     div_cnt   <= 0;
                     tick      <= '1';
                     digit_sel <= digit_sel + 1;
-                    if digit_sel = 7 then
-                        sys_cnt <= sys_cnt + 1;
-                    end if;
                 else
                     div_cnt <= div_cnt + 1;
                 end if;
@@ -92,24 +104,50 @@ begin
         end if;
     end process;
 
-    -- digit data mux
+    -- digit data mux (label digits handled entirely in seg process)
     with digit_sel select digit_val <=
-        patient_id                              when "000",
-        '0' & priority                          when "001",
-        '0' & room_num                          when "010",
-        '0' & doctor_num                        when "011",
-        '0' & equip_num                         when "100",
-        fsm_state                               when "101",
-        "000" & fault_code                      when "110",
-        std_logic_vector(sys_cnt)               when "111",
-        "0000"                                  when others;
+        patient_id       when "000",  -- AN0 rightmost: patient ID
+        "0000"           when "001",  -- AN1: sev_level label (handled in seg process)
+        '0' & room_num   when "010",  -- AN2: room number
+        "0000"           when "011",  -- AN3: r label (handled in seg process)
+        '0' & doctor_num when "100",  -- AN4: doctor number
+        "0000"           when "101",  -- AN5: d label (handled in seg process)
+        "0000"           when "110",  -- AN6: E/blank label (handled in seg process)
+        fsm_state        when "111",  -- AN7 leftmost: FSM state 0-9, F=fault
+        "0000"           when others;
 
-    -- anode select (active low: only selected digit enabled)
+    -- anode select (active low: one digit enabled at a time, all 8 active)
     process(digit_sel)
     begin
         an <= "11111111";
         an(to_integer(digit_sel)) <= '0';
     end process;
 
-    seg <= hex_to_seg(digit_val);
+    -- segment pattern: label digits handled here, numeric digits via hex_to_seg
+    process(digit_sel, digit_val, sev_level, critical_flag, fault_code)
+    begin
+        case digit_sel is
+            when "001" =>   -- AN1: sev_level label
+                case sev_level is
+                    when "00"   => seg <= letter_to_seg('n'); -- Normal
+                    when "01"   => seg <= letter_to_seg('U'); -- Urgent
+                    when "10"   => seg <= letter_to_seg('H'); -- High
+                    when "11"   => seg <= letter_to_seg('C'); -- Critical
+                    when others => seg <= "1111111";
+                end case;
+            when "011" =>   -- AN3: r label
+                seg <= letter_to_seg('r');
+            when "101" =>   -- AN5: d label
+                seg <= letter_to_seg('d');
+            when "110" =>   -- AN6: E on critical or fault, blank otherwise
+                if critical_flag = '1' or fault_code = '1' then
+                    seg <= letter_to_seg('E');
+                else
+                    seg <= "1111111";
+                end if;
+            when others =>
+                seg <= hex_to_seg(digit_val);
+        end case;
+    end process;
+
 end rtl;
