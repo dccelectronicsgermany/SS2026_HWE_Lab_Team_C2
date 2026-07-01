@@ -57,7 +57,6 @@ The project demonstrates the complete hardware design workflow using **Altium De
 
 - Altium Designer Professional 26.7.1
 - GitHub
-- Windows 11
 
 ---
 
