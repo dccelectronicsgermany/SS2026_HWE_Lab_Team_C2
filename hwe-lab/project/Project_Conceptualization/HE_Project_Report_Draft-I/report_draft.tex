@@ -1,0 +1,174 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{microtype}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\setlist{nosep,leftmargin=*}
+\newcommand{\HWE}{Smart Hospital Emergency Response Dispatcher}
+\begin{document}
+\title{Hardware Engineering Laboratory Final Report:\\FPGA-Based Smart Hospital Emergency Response Dispatcher}
+\author{\IEEEauthorblockN{Team C2}
+\IEEEauthorblockA{Hardware Engineering Laboratory, 6th Semester\\
+Hochschule Hamm-Lippstadt, Germany\\Summer Semester 2026}}
+\maketitle
+
+\begin{abstract}
+This report summarizes the complete Hardware Engineering Laboratory work completed by Team C2, from foundational combinational logic and arithmetic circuits to a modular Field-Programmable Gate Array (FPGA) system and a fabrication-ready custom printed circuit board. The final project, the \HWE, was implemented in VHDL for the Digilent Nexys A7-100T. It receives patient data, calculates priority, allocates rooms, doctors and equipment, supervises unsafe conditions, and presents status through light-emitting diodes, an eight-digit seven-segment display and Universal Asynchronous Receiver-Transmitter communication. The repository contains ten synthesizable project modules, ten dedicated testbenches with 115 assertions, a board constraint file and a generated bitstream. The laboratory demonstration successfully exercised normal dispatch, critical-patient handling, parking of multiple patients, selective release, resource exhaustion, fault indication and full reset. In parallel, a seven-sheet Altium design, two-layer printed circuit board layout, 120-line bill of materials and complete Gerber/drill outputs were produced. The work demonstrates an end-to-end engineering workflow covering specification, digital design, verification, FPGA deployment, human-machine interfacing, safety logic and electronic design automation.
+\end{abstract}
+
+\begin{IEEEkeywords}
+FPGA, VHDL, finite-state machine, resource management, functional safety, Altium Designer, printed circuit board, Nexys A7.
+\end{IEEEkeywords}
+
+\section{Introduction and Scope}
+The laboratory was structured as a progressive hardware-design programme. Early exercises established correct use of concurrent and behavioural VHDL, hierarchical composition and self-checking testbenches. These foundations were extended to ripple-carry arithmetic, binary-coded-decimal conversion, seven-segment decoding, clock division and synchronous counters. The final project integrated these skills into a safety-oriented cyber-physical demonstrator representing the workflow of a hospital emergency department.
+
+The principal engineering objective was not to implement a medical device, but to demonstrate deterministic hardware control: patient requests are encoded at the board inputs; triage information is latched; resources are allocated in a controlled sequence; invalid or unsafe situations trigger a fault; and the full state is made visible to an operator. The repository, design documentation, user manual, presentation and fabrication outputs were reviewed as the evidence base for this report \cite{repo,manual,concept}.
+
+\section{Laboratory Progression}
+\subsection{Combinational Logic and Arithmetic}
+The first phase implemented an XOR gate, half and full adders, and half and full subtractors. These tasks established Boolean modelling, entity/architecture separation and waveform-based validation. The next phase introduced structural reuse through a full adder constructed from half adders, a ripple-carry adder, an adder/subtractor, a binary-coded-decimal adder and a binary-coded-decimal-to-seven-segment decoder. The exercises therefore moved from isolated truth-table functions to multi-bit datapaths and hierarchical design.
+
+\subsection{FPGA Deployment and Sequential Logic}
+The arithmetic design was subsequently paired with Nexys A7 constraint files and generated bitstreams, demonstrating the transition from simulation to physical input/output mapping. Later work implemented a clock divider, a one-digit decimal counter and a two-digit decimal counter. The one-digit counter uses the 100 MHz board clock, a start/stop switch, a clear button and an active-low seven-segment output. This phase addressed clock-domain timing, human-visible update rates, synchronous control and display multiplexing.
+
+\begin{table}[t]
+\caption{Summary of Laboratory Achievements}
+\label{tab:labs}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}p{0.11\columnwidth}X X@{}}
+\toprule
+Phase & Main implementation & Engineering outcome \\
+\midrule
+Lab 1 & Gates, adders and subtractors & Boolean and behavioural VHDL; basic testbenches \\
+Lab 2 & Ripple-carry, add/subtract, BCD adder, seven-segment decoder & Hierarchy, arithmetic datapaths and display encoding \\
+Lab 4 & Altium schematic and PCB exercise & Electronic design automation and fabrication workflow \\
+Lab 5 & FPGA constraints and bitstreams & Physical synthesis, pin mapping and board validation \\
+Lab 7 & Clock divider and decimal counters & Sequential logic, clock scaling and display control \\
+Project & Hospital dispatcher system & Modular integration, safety supervision and demonstration \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Final System Architecture}
+The final implementation is organised as ten synthesizable VHDL modules with clear functional boundaries. The \texttt{patient\_generator} captures patient identity, type and severity. The \texttt{priority\_encoder} calculates triage priority. The \texttt{resource\_manager} maintains four-bit occupancy vectors for rooms, doctors and equipment and selects the first available resource. The \texttt{scheduler\_fsm} sequences the operational workflow. The \texttt{patient\_table} stores parked patients and their assigned resources, while the \texttt{safety\_supervisor} checks allocation and state consistency. Output handling is separated into LED, seven-segment and UART controllers, all connected by \texttt{top\_level}.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\columnwidth]{fsm.jpg}
+\caption{Implemented dispatcher finite-state-machine workflow.}
+\label{fig:fsm}
+\end{figure}
+
+The state machine in Fig.~\ref{fig:fsm} implements IDLE, RECEIVE PATIENT, TRIAGE, CHECK RESOURCES, three allocation stages, DISPATCH TEAM, MONITOR TREATMENT, RELEASE RESOURCES and FAULT. Manual stepping makes each transition observable during demonstration, whereas the treatment state advances with a severity-dependent timer. A park command returns the controller to IDLE while retaining occupied resources, enabling up to four concurrent patient records. Selective release uses a two-bit slot index to free the room, doctor and equipment associated with one parked patient.
+
+Priority is formed from a severity base value and a type-related boost. Critical patients therefore receive the highest scheduling significance, and an emergency-override input can force escalation. The design maps room, doctor and equipment occupancy to twelve LEDs; separate LEDs indicate critical status, active treatment, system fault and a latched blinking alarm. The eight-digit display presents patient identity, severity, room, doctor, emergency indication and finite-state-machine code \cite{manual}.
+
+\section{Safety and Deterministic Resource Control}
+Safety behaviour was implemented directly in hardware rather than added only as a display feature. The supervisor detects an allocation request when the relevant resource class is already full, resource exhaustion during allocation and invalid state encodings. The immediate fault output can clear after the initiating condition disappears, but the alarm is latched until reset. The scheduler also enters FAULT when required resources are unavailable, preventing uncontrolled continuation.
+
+The resource manager uses explicit occupancy registers and deterministic first-free selection. Allocation and release are issued as single-cycle control strobes. This creates an auditable transaction model: one controller requests an operation, one manager updates occupancy, and the safety supervisor independently observes the request and current capacity. The patient table has priority over normal finite-state-machine release indices when a parked patient is selectively released, avoiding simultaneous conflicting release paths.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{scenario_fault.png}
+\caption{Demonstration scenario for complete room occupancy and transition to FAULT.}
+\label{fig:fault}
+\end{figure}
+
+\section{Verification and Laboratory Demonstration}
+The project includes a dedicated testbench for every synthesizable module. Together, the ten project testbenches contain 115 explicit assertions. They check priority values, patient capture, allocation and release, patient-table storage, state transitions, fault latching, display encodings, UART frame transmission and top-level integration. The integration test covers a complete dispatch-and-release cycle, parking with resources retained, and selective release of a stored patient.
+
+The final bitstream and Nexys A7 constraint file provide implementation evidence beyond behavioural source code. During the laboratory demonstration, the board operated successfully and the team demonstrated the scenarios summarized in Table~\ref{tab:demo}. The result confirms that switch/button inputs, finite-state-machine stepping, occupancy LEDs, seven-segment status and safety responses functioned coherently on physical hardware.
+
+\begin{table}[t]
+\caption{Successful Demonstration Coverage}
+\label{tab:demo}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}p{0.33\columnwidth}X@{}}
+\toprule
+Scenario & Observed system behaviour \\
+\midrule
+Normal urgent patient & Full register, triage, allocate, dispatch, monitor and release sequence \\
+Critical heart attack & Critical indicator, maximum priority and extended treatment interval \\
+Emergency override & Input escalation to critical handling \\
+Multiple patients & Parked records retained with independent resource occupancy \\
+Selective release & Chosen patient slot released without disturbing other occupied slots \\
+No resources & FAULT state, fault LED and blinking latched alarm \\
+Full reset & Registers, resources, alarms and displays returned to ready state \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{scenario_critical.png}
+\caption{Critical-patient scenario used to communicate and demonstrate system behaviour.}
+\label{fig:critical}
+\end{figure}
+
+\section{Altium Schematic and PCB Design}
+A custom interface board was designed in Altium Designer Professional 26.7.1 to support the dispatcher concept. The design is split into seven schematic sheets: power, FPGA interface/core, clock/configuration/JTAG, inputs, LED outputs, four dual-digit seven-segment displays, and buzzer/UART. This sheet partitioning improves reviewability and supports independent checking of power, control and human-machine-interface functions \cite{schematic}.
+
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.32\textwidth}\centering
+\includegraphics[width=\linewidth]{schematic_power.png}\\[-1mm]
+\scriptsize (a) Multi-rail power section
+\end{minipage}\hfill
+\begin{minipage}{0.32\textwidth}\centering
+\includegraphics[width=\linewidth]{schematic_inputs.png}\\[-1mm]
+\scriptsize (b) Switch and push-button inputs
+\end{minipage}\hfill
+\begin{minipage}{0.32\textwidth}\centering
+\includegraphics[width=\linewidth]{schematic_7seg.png}\\[-1mm]
+\scriptsize (c) Seven-segment display interfaces
+\end{minipage}
+\caption{Selected sheets from the seven-sheet Altium schematic package.}
+\label{fig:schematics}
+\end{figure*}
+
+The board accepts 5 V input and includes 3.3 V, 1.8 V and 1.0 V regulator stages with local decoupling. A custom 56-pin connector interfaces to the Nexys A7. Operator controls comprise eight slide switches and six push buttons for reset, new patient, step, override, release and park. Outputs include sixteen LEDs, four dual-digit displays and a magnetic buzzer. UART and JTAG headers provide communication and programming access.
+
+The printed circuit board is a two-layer mixed through-hole/surface-mount design. The bill of materials contains 120 populated designator lines representing 20 unique component descriptions. Manufacturing outputs include top and bottom copper, solder mask, paste and legend layers, board profile, plated-through-hole and non-plated-through-hole drill data, an aperture file and the bill of materials \cite{pcb,bom}. This is a complete fabrication handoff rather than only a schematic concept.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\columnwidth]{pcb3d.jpg}
+\caption{Altium three-dimensional rendering of the Smart Hospital Dispatcher interface PCB.}
+\label{fig:pcb3d}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\columnwidth]{pcb_layout.png}
+\caption{Routed two-layer PCB layout and component placement.}
+\label{fig:layout}
+\end{figure}
+
+\section{Engineering Assessment}
+The strongest outcome is the continuity of the workflow. The team did not stop at an algorithmic finite-state-machine model: the work connects specification, VHDL decomposition, module-level and integration-level verification, constraint mapping, bitstream generation, physical demonstration, user documentation, schematic capture, printed circuit board layout and fabrication files. Functional concerns were also separated appropriately. Scheduling, resource accounting, patient storage, safety monitoring and user-interface encoding are independent modules, reducing coupling and making faults easier to localize.
+
+The evidence also supports several quality observations. First, the project uses self-checking testbenches rather than relying only on waveform inspection. Second, fault and alarm behaviour is intentionally different: fault reflects the present condition, whereas alarm memory requires operator reset. Third, resource assignment is deterministic, which makes demonstrations repeatable. Fourth, the manual defines exact switch settings, button sequences and expected display/LED results, enabling reproducible acceptance testing.
+
+Remaining engineering work is mainly associated with productisation. The Altium board should undergo a formal electrical-rule/design-rule review, power-budget and thermal calculation, connector pin-by-pin verification against the Nexys A7 electrical limits, signal-integrity review and manufactured-board bring-up. For the FPGA design, useful extensions would include automated synthesis/timing reports under version control, constrained-random or coverage-driven verification, debounce timing characterization, UART receive commands and persistent logging. These are logical next steps and do not diminish the achieved laboratory objective.
+
+\section{Conclusion}
+Team C2 completed a broad and coherent Hardware Engineering Laboratory portfolio. The work progressed from elementary combinational circuits to arithmetic subsystems, FPGA-mapped counters and a modular emergency-dispatch controller. The final system contains ten VHDL modules, ten self-checking testbenches, 115 assertions, a Nexys A7 bitstream and a successful physical demonstration covering normal, critical, multi-patient and fault scenarios. The accompanying Altium package adds seven schematic sheets, a routed two-layer printed circuit board, a 120-line bill of materials and full manufacturing data. Collectively, these deliverables demonstrate technical competence in digital logic, synchronous design, verification, FPGA implementation, safety-oriented control, human-machine interfacing and printed circuit board engineering.
+
+\begin{thebibliography}{00}
+\bibitem{repo} Team C2, ``SS2026 HWE Laboratory Repository,'' VHDL sources, testbenches, constraints and bitstreams, HSHL, 2026.
+\bibitem{manual} Team C2, ``FPGA-Based Smart Hospital Emergency Response Dispatcher: User Manual,'' 2026.
+\bibitem{concept} Team C2, ``FPGA-Based Smart Hospital Emergency Response Dispatcher Using the Digilent Nexys A7,'' project conceptualization document, 2026.
+\bibitem{schematic} Team C2, ``Smart Hospital Dispatcher Schematics,'' seven-sheet Altium schematic export, rev. 1, June 2026.
+\bibitem{pcb} Team C2, ``Smart Hospital Dispatcher PCB Layout and Gerber Fabrication Package,'' 2026.
+\bibitem{bom} Team C2, ``Smart Hospital Dispatcher Bill of Materials,'' Altium BOM export, 2026.
+\end{thebibliography}
+\end{document}
